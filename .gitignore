@@ -1,0 +1,200 @@
+# =================================================================
+# .NET Core / ASP.NET Core
+# =================================================================
+bin/
+obj/
+out/
+*.swp
+*.swo
+*~
+.vscode/
+.vs/
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio 2015/2017 cache/options directory
+.vs/
+
+# MSTest test Results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+# NUnit
+*.VisualState.xml
+TestResult.xml
+nunit-*.xml
+
+# .NET Core
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# ASP.NET Scaffolding
+ScaffoldingReadMe.txt
+
+# StyleCop
+StyleCopReport.xml
+
+# Files built by Visual Studio
+*_i.c
+*_p.c
+*_h.h
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.pch
+*.pdb
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp
+*.tmp_proj
+*_wpftmp.csproj
+*.log
+*.tlog
+*.vspscc
+*.vssscc
+.builds
+*.pidb
+*.svclog
+*.scc
+
+# =================================================================
+# Environment Variables & Secrets
+# =================================================================
+.env
+.env.local
+.env.development
+.env.production
+secrets.json
+appsettings.*.json.user
+
+# =================================================================
+# Database
+# =================================================================
+*.db
+*.sqlite
+*.sqlite3
+
+# =================================================================
+# Docker
+# =================================================================
+Dockerfile.prod
+docker-compose.override.yml
+.dockerignore
+
+# =================================================================
+# IDE and Editor Files
+# =================================================================
+.vscode/
+.vs/
+.idea/
+*.swp
+*.swo
+*~
+
+# =================================================================
+# OS Generated Files
+# =================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =================================================================
+# Node.js (if using for frontend build tools)
+# =================================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =================================================================
+# Logs
+# =================================================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =================================================================
+# Coverage Directory used by tools like istanbul
+# =================================================================
+coverage/
+*.lcov
+
+# =================================================================
+# Package Files
+# =================================================================
+*.nupkg
+*.snupkg
+.nuget/
+
+# =================================================================
+# JetBrains Rider
+# =================================================================
+.idea/
+*.sln.iml
+
+# =================================================================
+# Local History for Visual Studio Code
+# =================================================================
+.history/
+
+# =================================================================
+# Windows Installer files
+# =================================================================
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+
+# =================================================================
+# Windows shortcuts
+# =================================================================
+*.lnk
+
+# =================================================================
+# Backup & Temporary files
+# =================================================================
+*.bak
+*.backup
+*.tmp
+
+# =================================================================
+# Application specific
+# =================================================================
+# Add any application-specific files here
+uploads/
+temp/
