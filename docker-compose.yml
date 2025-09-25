@@ -1,0 +1,129 @@
+# =================================================================
+# Docker Compose - Development Environment
+# =================================================================
+# This compose file sets up a complete development environment with:
+# - API application container
+# - SQL Server database container
+# - Seq log server container (optional)
+# =================================================================
+
+version: '3.8'
+
+services:
+  # =================================================================
+  # API Application
+  # =================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dotnet-api-template
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=DotNetCoreAPITemplateDb;User Id=sa;Password=YourStrong@Password;TrustServerCertificate=true;MultipleActiveResultSets=true
+      - CorsSettings__AllowedOrigins__0=http://localhost:3000
+      - CorsSettings__AllowedOrigins__1=https://localhost:3000
+      - CorsSettings__AllowCredentials=true
+      - Serilog__WriteTo__0__Args__serverUrl=http://seq:5341
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    networks:
+      - app-network
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # =================================================================
+  # SQL Server Database
+  # =================================================================
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sqlserver-db
+    ports:
+      - "1433:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong@Password
+      - MSSQL_PID=Developer
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+      - ./scripts/db-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P YourStrong@Password -Q 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # =================================================================
+  # Seq Log Server (Optional - for structured log viewing)
+  # =================================================================
+  seq:
+    image: datalust/seq:latest
+    container_name: seq-logs
+    ports:
+      - "5341:80"
+    environment:
+      - ACCEPT_EULA=Y
+      - SEQ_FIRSTRUN_ADMINPASSWORDHASH=# Run this to get hash: echo 'admin' | docker run --rm -i datalust/seq config hash
+    volumes:
+      - seq-data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+    profiles:
+      - logging
+
+  # =================================================================
+  # Redis Cache (Optional - for future caching needs)
+  # =================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis-cache
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+    profiles:
+      - cache
+
+# =================================================================
+# Networks
+# =================================================================
+networks:
+  app-network:
+    driver: bridge
+    name: dotnet-api-network
+
+# =================================================================
+# Volumes
+# =================================================================
+volumes:
+  sqlserver-data:
+    driver: local
+    name: dotnet-api-sqlserver-data
+
+  seq-data:
+    driver: local
+    name: dotnet-api-seq-data
+
+  redis-data:
+    driver: local
+    name: dotnet-api-redis-data

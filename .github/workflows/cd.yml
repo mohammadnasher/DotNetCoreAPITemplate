@@ -1,0 +1,323 @@
+# =================================================================
+# Continuous Deployment Workflow
+# =================================================================
+# This workflow runs when a new tag is pushed (release)
+# It performs: build, test, create release, build Docker image, push to registry
+# =================================================================
+
+name: CD
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.2.3)'
+        required: true
+        type: string
+      create_release:
+        description: 'Create GitHub release'
+        required: true
+        type: boolean
+        default: true
+      deploy_to_staging:
+        description: 'Deploy to staging environment'
+        required: true
+        type: boolean
+        default: false
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # =================================================================
+  # Extract Version Information
+  # =================================================================
+  extract-version:
+    name: Extract Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+      is_prerelease: ${{ steps.extract.outputs.is_prerelease }}
+
+    steps:
+    - name: Extract version from tag
+      id: extract
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/v}
+        fi
+
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+        if [[ $VERSION == *"-"* ]]; then
+          echo "is_prerelease=true" >> $GITHUB_OUTPUT
+        else
+          echo "is_prerelease=false" >> $GITHUB_OUTPUT
+        fi
+
+        echo "Extracted version: $VERSION"
+        echo "Is prerelease: $([[ $VERSION == *"-"* ]] && echo "true" || echo "false")"
+
+  # =================================================================
+  # Build and Test
+  # =================================================================
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    needs: extract-version
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    - name: Update version in project files
+      run: |
+        VERSION="${{ needs.extract-version.outputs.version }}"
+        sed -i "s|<Version>.*</Version>|<Version>$VERSION</Version>|g" *.csproj
+        sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$VERSION.0</AssemblyVersion>|g" *.csproj
+        sed -i "s|<FileVersion>.*</FileVersion>|<FileVersion>$VERSION.0</FileVersion>|g" *.csproj
+        echo "$VERSION" > version.txt
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Test
+      run: dotnet test --configuration Release --no-build --verbosity normal
+
+    - name: Publish
+      run: dotnet publish --configuration Release --no-build --output ./publish
+
+    - name: Upload publish artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: publish-artifacts
+        path: ./publish
+
+    - name: Create NuGet packages
+      run: dotnet pack --configuration Release --no-build --output ./packages
+
+    - name: Upload NuGet packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: nuget-packages
+        path: ./packages
+
+  # =================================================================
+  # Build Docker Image
+  # =================================================================
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [extract-version, build-and-test]
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=tag
+          type=raw,value=${{ needs.extract-version.outputs.version }}
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          VERSION=${{ needs.extract-version.outputs.version }}
+          BUILD_DATE=${{ github.run_id }}
+          VCS_REF=${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Generate Docker image summary
+      run: |
+        echo "## 🐳 Docker Image Built" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Version:** \`${{ needs.extract-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Platforms:** linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Tags:" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  # =================================================================
+  # Create GitHub Release
+  # =================================================================
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [extract-version, build-and-test, build-docker]
+    if: always() && needs.build-and-test.result == 'success' && needs.build-docker.result == 'success' && (github.event_name == 'push' || github.event.inputs.create_release == 'true')
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download publish artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: publish-artifacts
+        path: ./publish
+
+    - name: Download NuGet packages
+      uses: actions/download-artifact@v4
+      with:
+        name: nuget-packages
+        path: ./packages
+
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        VERSION="${{ needs.extract-version.outputs.version }}"
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+        echo "## 🚀 What's New in v$VERSION" > release_notes.md
+        echo "" >> release_notes.md
+
+        if [[ -n "$PREVIOUS_TAG" ]]; then
+          echo "### Changes since $PREVIOUS_TAG:" >> release_notes.md
+          echo "" >> release_notes.md
+          git log --pretty=format:"- %s (%h)" $PREVIOUS_TAG..HEAD >> release_notes.md
+          echo "" >> release_notes.md
+        fi
+
+        echo "" >> release_notes.md
+        echo "### 📦 Artifacts" >> release_notes.md
+        echo "- **Docker Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION\`" >> release_notes.md
+        echo "- **NuGet Packages:** Available in release assets" >> release_notes.md
+        echo "- **Published Application:** Available in release assets" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "### 🔧 Installation" >> release_notes.md
+        echo "\`\`\`bash" >> release_notes.md
+        echo "# Pull Docker image" >> release_notes.md
+        echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "# Or run directly" >> release_notes.md
+        echo "docker run -p 8080:8080 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION" >> release_notes.md
+        echo "\`\`\`" >> release_notes.md
+
+    - name: Create ZIP archives
+      run: |
+        cd publish && zip -r ../dotnet-api-template-${{ needs.extract-version.outputs.version }}-publish.zip . && cd ..
+        cd packages && zip -r ../dotnet-api-template-${{ needs.extract-version.outputs.version }}-packages.zip . && cd ..
+
+    - name: Create Release
+      uses: ncipollo/release-action@v1
+      with:
+        tag: v${{ needs.extract-version.outputs.version }}
+        name: Release v${{ needs.extract-version.outputs.version }}
+        bodyFile: release_notes.md
+        prerelease: ${{ needs.extract-version.outputs.is_prerelease }}
+        artifacts: |
+          dotnet-api-template-${{ needs.extract-version.outputs.version }}-publish.zip
+          dotnet-api-template-${{ needs.extract-version.outputs.version }}-packages.zip
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  # =================================================================
+  # Deploy to Staging (Optional)
+  # =================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [extract-version, create-release]
+    if: always() && needs.create-release.result == 'success' && github.event.inputs.deploy_to_staging == 'true'
+    environment: staging
+
+    steps:
+    - name: Deploy to staging environment
+      run: |
+        echo "🚀 Deploying version ${{ needs.extract-version.outputs.version }} to staging"
+        echo "This is where you would implement your deployment logic"
+        echo "Examples:"
+        echo "- Update Kubernetes deployments"
+        echo "- Deploy to Azure Container Instances"
+        echo "- Update Docker Compose in staging server"
+        echo "- Trigger deployment pipeline"
+
+        # Example deployment commands (customize based on your infrastructure):
+        # kubectl set image deployment/api-deployment api=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.extract-version.outputs.version }}
+        # az container restart --name api-staging --resource-group myResourceGroup
+        # docker-compose -f docker-compose.staging.yml pull && docker-compose -f docker-compose.staging.yml up -d
+
+  # =================================================================
+  # Deployment Summary
+  # =================================================================
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [extract-version, build-and-test, build-docker, create-release, deploy-staging]
+    if: always()
+
+    steps:
+    - name: Generate deployment summary
+      run: |
+        echo "## 🎉 Release v${{ needs.extract-version.outputs.version }} Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Build & Test | ${{ needs.build-and-test.result == 'success' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Docker Build | ${{ needs.build-docker.result == 'success' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| GitHub Release | ${{ needs.create-release.result == 'success' && '✅ Created' || needs.create-release.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Staging Deploy | ${{ needs.deploy-staging.result == 'success' && '✅ Deployed' || needs.deploy-staging.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Release Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version:** \`${{ needs.extract-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Prerelease:** ${{ needs.extract-version.outputs.is_prerelease }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Docker Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.extract-version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY

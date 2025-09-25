@@ -1,0 +1,159 @@
+# =================================================================
+# Dependency Update Workflow
+# =================================================================
+# This workflow runs weekly to check for dependency updates
+# It creates PRs for outdated and vulnerable packages
+# =================================================================
+
+name: Dependency Update
+
+on:
+  schedule:
+    # Run every Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: '9.0.x'
+
+jobs:
+  # =================================================================
+  # Check for Updates
+  # =================================================================
+  check-updates:
+    name: Check Dependency Updates
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Check for outdated packages
+      run: |
+        echo "## 📦 Package Update Report" > update_report.md
+        echo "" >> update_report.md
+        echo "Generated on: $(date)" >> update_report.md
+        echo "" >> update_report.md
+
+        echo "### Outdated Packages" >> update_report.md
+        echo "" >> update_report.md
+        dotnet list package --outdated --format json > outdated.json 2>/dev/null || echo '{"projects": []}' > outdated.json
+
+        if [[ $(jq '.projects | length' outdated.json) -gt 0 ]]; then
+          echo "The following packages have newer versions available:" >> update_report.md
+          echo "" >> update_report.md
+          jq -r '.projects[].frameworks[].topLevelPackages[]? | "- **\(.id)**: \(.resolvedVersion) → \(.latestVersion)"' outdated.json >> update_report.md
+        else
+          echo "✅ All packages are up to date!" >> update_report.md
+        fi
+
+        echo "" >> update_report.md
+        echo "### Vulnerable Packages" >> update_report.md
+        echo "" >> update_report.md
+
+        dotnet list package --vulnerable --include-transitive --format json > vulnerable.json 2>/dev/null || echo '{"projects": []}' > vulnerable.json
+
+        if [[ $(jq '.projects | length' vulnerable.json) -gt 0 ]]; then
+          echo "⚠️ **SECURITY ALERT**: The following packages have known vulnerabilities:" >> update_report.md
+          echo "" >> update_report.md
+          jq -r '.projects[].frameworks[].topLevelPackages[]?.vulnerabilities[]? | "- **\(.id)**: \(.severity) - \(.advisoryUrl // "No advisory URL")"' vulnerable.json >> update_report.md
+        else
+          echo "✅ No vulnerable packages found!" >> update_report.md
+        fi
+
+    - name: Check if updates are available
+      id: check
+      run: |
+        OUTDATED_COUNT=$(jq '.projects[].frameworks[].topLevelPackages | length' outdated.json 2>/dev/null || echo 0)
+        VULNERABLE_COUNT=$(jq '.projects[].frameworks[].topLevelPackages[].vulnerabilities | length' vulnerable.json 2>/dev/null || echo 0)
+
+        if [[ $OUTDATED_COUNT -gt 0 || $VULNERABLE_COUNT -gt 0 ]]; then
+          echo "updates_available=true" >> $GITHUB_OUTPUT
+          echo "outdated_count=$OUTDATED_COUNT" >> $GITHUB_OUTPUT
+          echo "vulnerable_count=$VULNERABLE_COUNT" >> $GITHUB_OUTPUT
+        else
+          echo "updates_available=false" >> $GITHUB_OUTPUT
+          echo "outdated_count=0" >> $GITHUB_OUTPUT
+          echo "vulnerable_count=0" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload update report
+      uses: actions/upload-artifact@v4
+      with:
+        name: dependency-update-report
+        path: |
+          update_report.md
+          outdated.json
+          vulnerable.json
+
+    - name: Create issue for updates
+      if: steps.check.outputs.updates_available == 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('update_report.md', 'utf8');
+
+          const title = `🔄 Weekly Dependency Update - ${new Date().toISOString().split('T')[0]}`;
+          const body = report + '\n\n---\n\n' +
+            '**Actions Required:**\n' +
+            '1. Review the outdated packages and update where appropriate\n' +
+            '2. **URGENT**: Address any vulnerable packages immediately\n' +
+            '3. Test the application after updates\n' +
+            '4. Close this issue when updates are complete\n\n' +
+            'This issue was automatically created by the Dependency Update workflow.';
+
+          // Check if there's already an open dependency update issue
+          const { data: issues } = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'open',
+            labels: 'dependencies,automated'
+          });
+
+          const existingIssue = issues.find(issue =>
+            issue.title.includes('Weekly Dependency Update'));
+
+          if (existingIssue) {
+            // Update existing issue
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: existingIssue.number,
+              body: `## Updated Report - ${new Date().toISOString().split('T')[0]}\n\n${report}`
+            });
+            console.log(`Updated existing issue #${existingIssue.number}`);
+          } else {
+            // Create new issue
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['dependencies', 'automated', 'maintenance']
+            });
+            console.log(`Created new issue #${issue.data.number}`);
+          }
+
+    - name: Summary
+      run: |
+        echo "## 📋 Dependency Check Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Outdated packages:** ${{ steps.check.outputs.outdated_count }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Vulnerable packages:** ${{ steps.check.outputs.vulnerable_count }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [[ "${{ steps.check.outputs.updates_available }}" == "true" ]]; then
+          echo "🔔 **Action Required:** Updates are available. An issue has been created for tracking." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "✅ **All Good:** No updates required at this time." >> $GITHUB_STEP_SUMMARY
+        fi

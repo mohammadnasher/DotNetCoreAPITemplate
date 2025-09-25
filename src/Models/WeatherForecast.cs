@@ -1,4 +1,4 @@
-namespace DotNetCoreAPITemplate;
+namespace DotNetCoreAPITemplate.Models;
 
 public class WeatherForecast
 {
