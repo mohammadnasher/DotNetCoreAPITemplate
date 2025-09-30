@@ -18,8 +18,8 @@ public static class DatabaseExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Get connection string with environment variable override support
-        var connectionString = configuration.GetConnectionStringWithEnvironmentOverride("DefaultConnection");
+        // Get connection string from appsettings.json
+        var connectionString = configuration.GetConnectionString("DefaultConnection");
 
         // Add Entity Framework with SQL Server
         services.AddDbContext<ApplicationDbContext>(options =>

@@ -43,7 +43,6 @@
     <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
 
     <!-- Configuration -->
-    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.0.0" />
 
     <!-- Health Checks -->
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="9.0.0" />
