@@ -14,7 +14,6 @@ namespace DotNetCoreAPITemplate.Controllers;
 [ApiVersion("1.0")]
 [Route("api/v{version:apiVersion}/test")]
 [Produces("application/json")]
-[SwaggerTag("Test endpoints for demonstrating CRUD operations and API patterns")]
 public class TestController : ControllerBase
 {
     private readonly ISampleEntityService _sampleEntityService;

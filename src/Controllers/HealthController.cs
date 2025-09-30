@@ -195,9 +195,9 @@ public class HealthController : ControllerBase
 
             // Fallback to file creation time
             var location = assembly.Location;
-            if (!string.IsNullOrEmpty(location) && File.Exists(location))
+            if (!string.IsNullOrEmpty(location) && System.IO.File.Exists(location))
             {
-                return File.GetCreationTime(location);
+                return System.IO.File.GetCreationTime(location);
             }
         }
         catch

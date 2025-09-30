@@ -257,12 +257,11 @@ public class PerformanceLoggingMiddleware
                     context.Request.Path,
                     elapsed);
 
-                _logger.ForContext("Performance", true)
-                    .Information("Slow Request: {RequestMethod} {RequestPath} {StatusCode} {ElapsedMs}ms",
-                        context.Request.Method,
-                        context.Request.Path,
-                        context.Response.StatusCode,
-                        elapsed);
+                _logger.LogInformation("Slow Request: {RequestMethod} {RequestPath} {StatusCode} {ElapsedMs}ms",
+                    context.Request.Method,
+                    context.Request.Path,
+                    context.Response.StatusCode,
+                    elapsed);
             }
         }
     }

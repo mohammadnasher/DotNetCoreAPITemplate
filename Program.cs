@@ -111,12 +111,12 @@ try
     app.MapControllers();
 
     // Ensure database is created and migrated
-    app.EnsureDatabaseCreated(Log.Logger);
+    app.EnsureDatabaseCreated();
 
     // Seed database if empty
     if (app.Environment.IsDevelopment())
     {
-        app.SeedDatabase(Log.Logger);
+        app.SeedDatabase();
     }
 
     Log.Information("DotNet Core API Template started successfully");
